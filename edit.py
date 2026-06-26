@@ -22,8 +22,13 @@ class Editor:
         self.sel_anchor = None  # (y, x) selection anchor, or None if no selection
 
         if filename and os.path.exists(filename):
-            with open(filename, "r", encoding="utf-8", errors="replace") as f:
-                text = f.read()
+            with open(filename, "rb") as f:
+                raw = f.read()
+            try:
+                text = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                text = raw.decode("utf-8", errors="replace")
+                self.message = f"Warning: {filename} is not valid UTF-8; invalid bytes were replaced"
             self.lines = text.split("\n") if text else [""]
 
         curses.curs_set(1)
@@ -50,7 +55,10 @@ class Editor:
     def run(self):
         while True:
             self.draw()
-            ch = self.stdscr.getch()
+            try:
+                ch = self.stdscr.get_wch()
+            except curses.error:
+                continue
             self.handle_key(ch)
             if self.quit_pending:
                 return
@@ -144,86 +152,84 @@ class Editor:
 
     def handle_key(self, ch):
         self.message = ""
+        code = ord(ch) if isinstance(ch, str) else ch
 
-        if ch == curses.KEY_RESIZE:
+        if code == curses.KEY_RESIZE:
             return
-        elif ch == curses.KEY_MOUSE:
+        elif code == curses.KEY_MOUSE:
             self.handle_mouse()
-        elif ch in (curses.KEY_UP,):
+        elif code in (curses.KEY_UP,):
             self.sel_anchor = None
             self.move_cursor(-1, 0)
-        elif ch in (curses.KEY_DOWN,):
+        elif code in (curses.KEY_DOWN,):
             self.sel_anchor = None
             self.move_cursor(1, 0)
-        elif ch in (curses.KEY_LEFT,):
+        elif code in (curses.KEY_LEFT,):
             self.sel_anchor = None
             self.move_cursor(0, -1)
-        elif ch in (curses.KEY_RIGHT,):
+        elif code in (curses.KEY_RIGHT,):
             self.sel_anchor = None
             self.move_cursor(0, 1)
-        elif ch in (getattr(curses, "KEY_SR", None), getattr(curses, "KEY_SUP", None), 547):  # shift+up
+        elif code in (getattr(curses, "KEY_SR", None), getattr(curses, "KEY_SUP", None), 547):  # shift+up
             self.sel_anchor = self.sel_anchor or (self.cy, self.cx)
             self.move_cursor(-1, 0)
-        elif ch in (getattr(curses, "KEY_SF", None), getattr(curses, "KEY_SDOWN", None), 548):  # shift+down
+        elif code in (getattr(curses, "KEY_SF", None), getattr(curses, "KEY_SDOWN", None), 548):  # shift+down
             self.sel_anchor = self.sel_anchor or (self.cy, self.cx)
             self.move_cursor(1, 0)
-        elif ch == curses.KEY_SLEFT:  # shift+left
+        elif code == curses.KEY_SLEFT:  # shift+left
             self.sel_anchor = self.sel_anchor or (self.cy, self.cx)
             self.move_cursor(0, -1)
-        elif ch == curses.KEY_SRIGHT:  # shift+right
+        elif code == curses.KEY_SRIGHT:  # shift+right
             self.sel_anchor = self.sel_anchor or (self.cy, self.cx)
             self.move_cursor(0, 1)
-        elif ch == curses.KEY_HOME:
+        elif code == curses.KEY_HOME:
             self.sel_anchor = None
             self.cx = 0
-        elif ch == curses.KEY_END:
+        elif code == curses.KEY_END:
             self.sel_anchor = None
             self.cx = len(self.lines[self.cy])
-        elif ch == curses.KEY_PPAGE:
+        elif code == curses.KEY_PPAGE:
             self.sel_anchor = None
             self.move_cursor(-self.rows, 0)
-        elif ch == curses.KEY_NPAGE:
+        elif code == curses.KEY_NPAGE:
             self.sel_anchor = None
             self.move_cursor(self.rows, 0)
-        elif ch == curses.KEY_SHOME:  # shift+home
+        elif code == curses.KEY_SHOME:  # shift+home
             self.sel_anchor = self.sel_anchor or (self.cy, self.cx)
             self.cx = 0
-        elif ch == curses.KEY_SEND:  # shift+end
+        elif code == curses.KEY_SEND:  # shift+end
             self.sel_anchor = self.sel_anchor or (self.cy, self.cx)
             self.cx = len(self.lines[self.cy])
-        elif ch == curses.KEY_SPREVIOUS:  # shift+page up
+        elif code == curses.KEY_SPREVIOUS:  # shift+page up
             self.sel_anchor = self.sel_anchor or (self.cy, self.cx)
             self.move_cursor(-self.rows, 0)
-        elif ch == curses.KEY_SNEXT:  # shift+page down
+        elif code == curses.KEY_SNEXT:  # shift+page down
             self.sel_anchor = self.sel_anchor or (self.cy, self.cx)
             self.move_cursor(self.rows, 0)
-        elif ch in (curses.KEY_BACKSPACE, curses.ascii.BS, curses.ascii.DEL, 127):
+        elif code in (curses.KEY_BACKSPACE, curses.ascii.BS, curses.ascii.DEL, 127):
             self.backspace()
-        elif ch == curses.KEY_DC:
+        elif code == curses.KEY_DC:
             self.delete_forward()
-        elif ch in (curses.ascii.CR, curses.ascii.NL, 10, 13):
+        elif code in (curses.ascii.CR, curses.ascii.NL, 10, 13):
             self.newline()
-        elif ch == curses.ascii.ctrl(ord("q")):  # ^Q exit
+        elif code == curses.ascii.ctrl(ord("q")):  # ^Q exit
             self.exit()
-        elif ch == curses.ascii.ctrl(ord("s")):  # ^S save
+        elif code == curses.ascii.ctrl(ord("s")):  # ^S save
             self.save()
-        elif ch == curses.ascii.ctrl(ord("g")):  # ^G help
+        elif code == curses.ascii.ctrl(ord("g")):  # ^G help
             self.message = "^Q Quit ^S Save  ^F Search  ^X Cut  ^C Copy  ^V Paste  Shift+Arrows Select"
-        elif ch == curses.ascii.ctrl(ord("f")):  # ^F search
+        elif code == curses.ascii.ctrl(ord("f")):  # ^F search
             self.search()
-        elif ch == curses.ascii.ctrl(ord("x")):  # ^X cut line
+        elif code == curses.ascii.ctrl(ord("x")):  # ^X cut line
             self.cut_line()
-        elif ch == curses.ascii.ctrl(ord("c")):  # ^C copy line
+        elif code == curses.ascii.ctrl(ord("c")):  # ^C copy line
             self.copy_line()
-        elif ch == curses.ascii.ctrl(ord("v")):  # ^V paste
+        elif code == curses.ascii.ctrl(ord("v")):  # ^V paste
             self.paste()
-        elif ch == curses.ascii.ESC:  # cancel selection
+        elif code == curses.ascii.ESC:  # cancel selection
             self.sel_anchor = None
-        elif 32 <= ch < 127 or ch > 127:
-            try:
-                self.insert(chr(ch))
-            except (ValueError, OverflowError):
-                pass
+        elif isinstance(ch, str) and code >= 32:
+            self.insert(ch)
 
     def move_cursor(self, dy, dx):
         if dy:
@@ -250,11 +256,12 @@ class Editor:
         except curses.error:
             return
 
+        button4_pressed = getattr(curses, "BUTTON4_PRESSED", 0x00080000)
         button5_pressed = getattr(curses, "BUTTON5_PRESSED", 0x02000000)
 
         if bstate & (curses.BUTTON1_PRESSED | curses.BUTTON1_CLICKED):
             self.click_to_position(my, mx)
-        elif bstate & curses.BUTTON4_PRESSED:
+        elif bstate & button4_pressed:
             self.move_cursor(-3, 0)
         elif bstate & button5_pressed:
             self.move_cursor(3, 0)
@@ -367,15 +374,19 @@ class Editor:
             self.stdscr.addnstr(maxy - 1, 0, (label + buf).ljust(maxx), maxx - 1, curses.A_REVERSE)
             self.stdscr.move(maxy - 1, min(len(label) + len(buf), maxx - 1))
             self.stdscr.refresh()
-            ch = self.stdscr.getch()
-            if ch in (curses.ascii.CR, curses.ascii.NL, 10, 13):
+            try:
+                ch = self.stdscr.get_wch()
+            except curses.error:
+                continue
+            code = ord(ch) if isinstance(ch, str) else ch
+            if code in (curses.ascii.CR, curses.ascii.NL, 10, 13):
                 return buf
-            elif ch == curses.ascii.ESC:
+            elif code == curses.ascii.ESC:
                 return None
-            elif ch in (curses.KEY_BACKSPACE, curses.ascii.BS, 127):
+            elif code in (curses.KEY_BACKSPACE, curses.ascii.BS, 127):
                 buf = buf[:-1]
-            elif 32 <= ch < 127:
-                buf += chr(ch)
+            elif isinstance(ch, str) and code >= 32:
+                buf += ch
 
     def save(self):
         name = self.filename
