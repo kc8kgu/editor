@@ -19,6 +19,7 @@ class Editor:
         self.message = ""
         self.quit_pending = False
         self.clipboard = None
+        self.clipboard_is_line = False  # True if clipboard holds a whole cut/copied line
         self.sel_anchor = None  # (y, x) selection anchor, or None if no selection
 
         if filename and os.path.exists(filename):
@@ -38,11 +39,14 @@ class Editor:
 
         self.title_attr = curses.A_REVERSE
         self.status_attr = curses.A_REVERSE
+        self.sel_attr = curses.A_REVERSE
         if curses.has_colors():
             curses.start_color()
             curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_BLUE)
+            curses.init_pair(2, curses.COLOR_BLACK, curses.COLOR_YELLOW)
             self.title_attr = curses.color_pair(1)
             self.status_attr = curses.color_pair(1)
+            self.sel_attr = curses.color_pair(2)
 
     @property
     def rows(self):
@@ -79,7 +83,16 @@ class Editor:
                 self.draw_line(i + 1, lineno, self.lines[lineno], sel, maxx)
 
         status = self.message or "^Q Quit  ^S Save  ^F Search  ^X Cut  ^C Copy  ^V Paste"
-        self.stdscr.addnstr(maxy - 1, 0, status.ljust(maxx), maxx - 1, self.status_attr)
+        view_end = min(self.top + self.rows, len(self.lines))
+        position = f"Ln {self.cy + 1}/{len(self.lines)}, Col {self.cx + 1}  [{self.top + 1}-{view_end}]"
+        width = maxx - 1
+        status = status[:width]
+        pad = width - len(status) - len(position)
+        if pad >= 1:
+            status = status + " " * pad + position
+        else:
+            status = status.ljust(width)
+        self.stdscr.addnstr(maxy - 1, 0, status, width, self.status_attr)
 
         screen_y = self.cy - self.top + 1
         screen_x = min(self.cx, maxx - 1)
@@ -103,11 +116,11 @@ class Editor:
             self.stdscr.addnstr(screen_row, x, before, width)
             x += len(before)
         if middle and x < width:
-            self.stdscr.addnstr(screen_row, x, middle, width - x, curses.A_REVERSE)
+            self.stdscr.addnstr(screen_row, x, middle, width - x, self.sel_attr)
             x += len(middle)
         elif not middle and lineno != ey and x < width:
             # selection spans the line break; show a highlighted blank cell
-            self.stdscr.addnstr(screen_row, x, " ", width - x, curses.A_REVERSE)
+            self.stdscr.addnstr(screen_row, x, " ", width - x, self.sel_attr)
             x += 1
         if after and x < width:
             self.stdscr.addnstr(screen_row, x, after, width - x)
@@ -325,10 +338,12 @@ class Editor:
     def cut_line(self):
         if self.sel_anchor is not None:
             self.clipboard = self.selected_text()
+            self.clipboard_is_line = False
             self.delete_selection()
             self.message = "Cut selection"
             return
         self.clipboard = self.lines[self.cy]
+        self.clipboard_is_line = True
         if len(self.lines) > 1:
             del self.lines[self.cy]
             self.cy = min(self.cy, len(self.lines) - 1)
@@ -341,10 +356,12 @@ class Editor:
     def copy_line(self):
         if self.sel_anchor is not None:
             self.clipboard = self.selected_text()
+            self.clipboard_is_line = False
             self.sel_anchor = None
             self.message = "Copied selection"
             return
         self.clipboard = self.lines[self.cy]
+        self.clipboard_is_line = True
         self.message = "Copied line"
 
     def paste(self):
@@ -352,7 +369,7 @@ class Editor:
             self.message = "Clipboard empty"
             return
         self.delete_selection()
-        if "\n" not in self.clipboard:
+        if self.clipboard_is_line:
             self.lines.insert(self.cy, self.clipboard)
             self.cy += 1
             self.cx = 0
@@ -408,13 +425,21 @@ class Editor:
         if not term:
             return
         n = len(self.lines)
+        idx = self.lines[self.cy].find(term, self.cx)
+        if idx != -1:
+            self.sel_anchor = (self.cy, idx)
+            self.cx = idx + len(term)
+            self.message = f"Found at line {self.cy + 1}"
+            return
         for offset in range(1, n + 1):
             row = (self.cy + offset) % n
-            idx = self.lines[row].find(term, self.cx + 1 if row == self.cy else 0)
+            idx = self.lines[row].find(term)
             if idx != -1:
-                self.cy, self.cx = row, idx
+                self.sel_anchor = (row, idx)
+                self.cy, self.cx = row, idx + len(term)
                 self.message = f"Found at line {row + 1}"
                 return
+        self.sel_anchor = None
         self.message = f"\"{term}\" not found"
 
     def exit(self):

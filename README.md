@@ -34,6 +34,12 @@ A nano / pico-style terminal text editor, written in Python with `curses`.
 pip install -r requirements.txt
 ```
 
+On Windows, you can build and install `editor.exe` to `%USERPROFILE%\.local\bin` in one step with:
+
+```powershell
+./build.ps1
+```
+
 ## Usage
 
 ```bash
