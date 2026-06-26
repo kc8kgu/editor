@@ -53,6 +53,7 @@ class Editor:
         self.cy = 0          # cursor row in buffer
         self.cx = 0          # cursor col in buffer
         self.top = 0         # first visible buffer row
+        self.left = 0        # first visible buffer column
         self.dirty = False
         self.message = ""
         self.quit_pending = False
@@ -68,7 +69,8 @@ class Editor:
             except UnicodeDecodeError:
                 text = raw.decode("utf-8", errors="replace")
                 self.message = f"Warning: {filename} is not valid UTF-8; invalid bytes were replaced"
-            self.lines = text.split("\n") if text else [""]
+            lines = text.split("\n") if text else [""]
+            self.lines = [line[:-1] if line.endswith("\r") else line for line in lines]
 
         curses.curs_set(1)
         curses.raw()
@@ -136,12 +138,14 @@ class Editor:
         self.stdscr.addnstr(maxy - 1, 0, status, width, self.status_attr)
 
         screen_y = self.cy - self.top + 1
-        screen_x = min(self.cx, maxx - 1)
-        self.stdscr.move(max(0, min(screen_y, maxy - 1)), max(0, screen_x))
+        screen_x = self.cx - self.left
+        self.stdscr.move(max(0, min(screen_y, maxy - 1)), max(0, min(screen_x, maxx - 1)))
         self.stdscr.refresh()
 
     def draw_line(self, screen_row, lineno, text, sel, maxx):
         width = maxx - 1
+        full_len = len(text)
+        text = text[self.left :]
         if sel is None:
             self.stdscr.addnstr(screen_row, 0, text, width)
             return
@@ -150,7 +154,9 @@ class Editor:
             self.stdscr.addnstr(screen_row, 0, text, width)
             return
         start = sx if lineno == sy else 0
-        end = ex if lineno == ey else len(text)
+        end = ex if lineno == ey else full_len
+        start = max(0, start - self.left)
+        end = max(0, end - self.left)
         before, middle, after = text[:start], text[start:end], text[end:]
         x = 0
         if before:
@@ -203,6 +209,12 @@ class Editor:
             self.top = self.cy
         elif self.cy >= self.top + self.rows:
             self.top = self.cy - self.rows + 1
+
+        width = self.cols - 1
+        if self.cx < self.left:
+            self.left = max(0, self.cx - width + 1)
+        elif self.cx >= self.left + width:
+            self.left = self.cx - width + 1
 
     def handle_key(self, ch):
         self.message = ""
@@ -329,7 +341,7 @@ class Editor:
         row = self.top + my - 1
         row = max(0, min(len(self.lines) - 1, row))
         self.cy = row
-        self.cx = max(0, min(mx, len(self.lines[row])))
+        self.cx = max(0, min(mx + self.left, len(self.lines[row])))
 
     def insert(self, ch):
         self.delete_selection()
